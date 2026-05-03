@@ -937,6 +937,8 @@ function saveAgEv(){
   const obj={id:editAgId||genId(),name,type,date,time:document.getElementById('agEvTime').value||'',desc:document.getElementById('agEvDesc').value.trim()};
   if(editAgId){const i=evs.findIndex(e=>e.id===editAgId);if(i>=0)evs[i]=obj;}else evs.push(obj);
   saveAgEvs(evs);agSelDate=date;
+  // refresh SW cache for background notifications
+  if('caches' in window){caches.open('maquinista-v1').then(c=>{const agE=loadAgEvs().filter(e=>e.type==='exam');c.put('exam-data',new Response(JSON.stringify({exams:agE,sent:L('notifSent',[])})));});}
   if(type==='exam'){
     const nxExams=loadNxExams();const already=nxExams.find(x=>x.agId===obj.id);
     const examDefaults={preset:'final',presetLabel:'Final',rcfTotal:60,rcfMaxFail:12,espTotal:20,espMaxFail:7};
@@ -1301,7 +1303,18 @@ function importData(e){
 // ── NOTIFICATIONS ──
 function requestNotifPermission(){
   if(!('Notification' in window))return;
-  if(Notification.permission==='default')Notification.requestPermission();
+  // Only ask if not yet decided — browser remembers 'granted'/'denied' permanently per origin
+  if(Notification.permission!=='default')return;
+  // Ask on first tap/click instead of immediately on load
+  const askOnce=()=>{
+    Notification.requestPermission().then(p=>{
+      if(p==='granted')setTimeout(checkExamNotifications,500);
+    });
+    document.removeEventListener('click',askOnce);
+    document.removeEventListener('touchend',askOnce);
+  };
+  document.addEventListener('click',askOnce,{once:true});
+  document.addEventListener('touchend',askOnce,{once:true});
 }
 function checkExamNotifications(){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
@@ -1345,6 +1358,73 @@ tick();
 setInterval(tick,1000);
 setInterval(checkExamNotifications,60000);
 setTimeout(checkExamNotifications,2000);
+
+// ── SERVICE WORKER ──
+if('serviceWorker' in navigator){
+  const swCode=`
+const CACHE='maquinista-v1';
+self.addEventListener('install',e=>{self.skipWaiting();});
+self.addEventListener('activate',e=>{e.waitUntil(clients.claim());});
+
+// Background sync check every hour via periodic background sync if supported
+self.addEventListener('periodicsync',e=>{
+  if(e.tag==='exam-check')e.waitUntil(checkAndNotify());
+});
+
+// Also check on push (fallback)
+self.addEventListener('push',e=>{
+  e.waitUntil(self.registration.showNotification('Maquinista',{body:e.data?e.data.text():'Recordatorio de examen'}));
+});
+
+async function checkAndNotify(){
+  const clients_list=await clients.matchAll();
+  if(clients_list.length>0)return; // app open, let it handle
+  // Read stored exam data
+  try{
+    const cache=await caches.open(CACHE);
+    const r=await cache.match('exam-data');
+    if(!r)return;
+    const data=await r.json();
+    const today=new Date();today.setHours(0,0,0,0);
+    (data.exams||[]).forEach(ev=>{
+      const evD=new Date(ev.date+'T00:00:00');
+      const diff=Math.round((evD-today)/86400000);
+      const key=diff===0?'today':'tomorrow';
+      if((diff===0||diff===1)&&!(data.sent||[]).includes(key+'_'+ev.id)){
+        const title=diff===0?'🔴 EXAMEN HOY':'⚠️ EXAMEN MAÑANA';
+        const body=diff===0?\`\${ev.name} es HOY. ¡Mucho ánimo!\`:\`\${ev.name} es mañana. Repasa esta noche.\`;
+        self.registration.showNotification(title,{body,icon:'/favicon.ico',badge:'/favicon.ico',vibrate:[200,100,200],tag:key+'_'+ev.id,renotify:false});
+      }
+    });
+  }catch(e){}
+}
+
+// Check on SW startup (e.g. browser opens in background)
+setTimeout(checkAndNotify, 1000);
+`;
+  const blob=new Blob([swCode],{type:'application/javascript'});
+  const swUrl=URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl,{scope:'/'}).then(reg=>{
+    // Try periodic background sync
+    if('periodicSync' in reg){
+      navigator.permissions.query({name:'periodic-background-sync'}).then(status=>{
+        if(status.state==='granted'){
+          reg.periodicSync.register('exam-check',{minInterval:3600000}).catch(()=>{});
+        }
+      }).catch(()=>{});
+    }
+  }).catch(()=>{});
+
+  // Save exam data to cache so SW can read it without localStorage
+  navigator.serviceWorker.ready.then(reg=>{
+    caches.open('maquinista-v1').then(cache=>{
+      const agEvs=loadAgEvs().filter(e=>e.type==='exam');
+      const sent=L('notifSent',[]);
+      cache.put('exam-data',new Response(JSON.stringify({exams:agEvs,sent})));
+    });
+  });
+}
+
 </script>
 </body>
 </html>
