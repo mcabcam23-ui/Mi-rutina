@@ -378,7 +378,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
 .color-dot.sel{border-color:var(--text);box-shadow:0 0 0 2px var(--border2);}
 
 /* ══ NAV ══ */
-.bnav{flex-shrink:0;display:flex;background:var(--panel);border-top:1px solid var(--border);padding:6px 0 max(6px,env(safe-area-inset-bottom));z-index:50;position:relative;}
+.bnav{flex-shrink:0;display:flex;background:var(--panel);border-top:1px solid var(--border);padding:6px 0 max(6px,env(safe-area-inset-bottom));z-index:100;position:fixed;bottom:0;left:0;right:0;}
 .bnav::before{content:'';position:absolute;top:-1px;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(245,196,0,.15),transparent);}
 .ni{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;cursor:pointer;border:none;background:none;color:var(--muted);transition:color .2s;}
 .ni.active{color:var(--y);}
@@ -490,7 +490,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
 <div class="view" id="view-notas">
   <div class="nx-hero">
     <div class="nx-hero-title">NOTAS DE<br><em>EXAMEN</em></div>
-    <div class="nx-hero-sub">RCF: 60 preg · máx 12 fallos &nbsp;|&nbsp; ESPECÍFICAS: 20 preg · máx 7 fallos</div>
+    <div class="nx-hero-sub">Registra tus notas y sigue tu evolución por examen</div>
   </div>
   <div class="nx-tabs" id="nxTabs"></div>
   <div class="nx-entry" id="nxEntry"></div>
@@ -600,8 +600,32 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
 <div class="overlay" id="ov-nxexam" onclick="ovClick(event,'ov-nxexam')">
   <div class="sheet sheet-r">
     <div class="sheet-title" id="nxExamTitle">NUEVO EXAMEN</div>
-    <div class="sheet-sub">Crea el examen para registrar notas</div>
+    <div class="sheet-sub">Define las reglas del examen</div>
     <div class="field"><label>NOMBRE DEL EXAMEN</label><input type="text" id="nxExamName" placeholder="Ej: Parcial 1 — Legislación" maxlength="60"></div>
+    <div class="field"><label>TIPO DE EXAMEN</label>
+      <select id="nxExamTypePreset" onchange="applyExamPreset()">
+        <option value="final">📋 Final — 60 RCF + 20 Específicas</option>
+        <option value="control80">📝 Control 80 Específicas</option>
+        <option value="presencial">🏫 Presencial — 50 RCF + 50 Específicas</option>
+        <option value="custom">⚙️ Personalizado</option>
+      </select>
+    </div>
+    <div id="nxExamCustomFields">
+      <div style="background:var(--card);border:1px solid var(--border);padding:12px;margin-bottom:12px;border-radius:2px">
+        <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:10px">BLOQUE RCF</div>
+        <div class="two-col">
+          <div class="field" style="margin-bottom:0"><label>Nº PREGUNTAS</label><input type="number" id="nxRcfTotal" min="0" max="200" placeholder="60"></div>
+          <div class="field" style="margin-bottom:0"><label>MÁX FALLOS</label><input type="number" id="nxRcfMaxFail" min="0" max="200" placeholder="12"></div>
+        </div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);padding:12px;margin-bottom:12px;border-radius:2px">
+        <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:10px">BLOQUE ESPECÍFICAS</div>
+        <div class="two-col">
+          <div class="field" style="margin-bottom:0"><label>Nº PREGUNTAS</label><input type="number" id="nxEspTotal" min="0" max="200" placeholder="20"></div>
+          <div class="field" style="margin-bottom:0"><label>MÁX FALLOS</label><input type="number" id="nxEspMaxFail" min="0" max="200" placeholder="7"></div>
+        </div>
+      </div>
+    </div>
     <div class="field"><label>FECHA</label><input type="date" id="nxExamDate"></div>
     <button class="btn-primary" style="width:100%;margin-bottom:8px" onclick="saveNxExam()">GUARDAR</button>
     <button class="btn-danger" style="width:100%;margin-bottom:8px" id="nxExamDelBtn" onclick="deleteNxExam()">BORRAR EXAMEN</button>
@@ -915,7 +939,8 @@ function saveAgEv(){
   saveAgEvs(evs);agSelDate=date;
   if(type==='exam'){
     const nxExams=loadNxExams();const already=nxExams.find(x=>x.agId===obj.id);
-    if(!already){nxExams.push({id:genId(),agId:obj.id,name:obj.name,date:obj.date});saveNxExams(nxExams);}
+    const examDefaults={preset:'final',presetLabel:'Final',rcfTotal:60,rcfMaxFail:12,espTotal:20,espMaxFail:7};
+    if(!already){nxExams.push({id:genId(),agId:obj.id,name:obj.name,date:obj.date,...examDefaults});saveNxExams(nxExams);}
     else{already.name=obj.name;already.date=obj.date;saveNxExams(nxExams);}
   }
   closeOv('ov-agev');buildAgenda();
@@ -923,7 +948,24 @@ function saveAgEv(){
 function deleteAgEv(){if(!editAgId)return;saveAgEvs(loadAgEvs().filter(e=>e.id!==editAgId));closeOv('ov-agev');buildAgenda();}
 
 // ── NOTAS EXAMEN ──
+// Presets: each has rcfTotal, rcfMaxFail, espTotal, espMaxFail (0 = block disabled)
+const EXAM_PRESETS={
+  final:    {rcfTotal:60,rcfMaxFail:12,espTotal:20, espMaxFail:7,  label:'Final'},
+  control80:{rcfTotal:0, rcfMaxFail:0, espTotal:80, espMaxFail:19, label:'Control 80 Esp.'},
+  presencial:{rcfTotal:50,rcfMaxFail:8,espTotal:50, espMaxFail:14, label:'Presencial'},
+  custom:   {rcfTotal:60,rcfMaxFail:12,espTotal:20, espMaxFail:7,  label:'Personalizado'},
+};
+
+function applyExamPreset(){
+  const preset=EXAM_PRESETS[document.getElementById('nxExamTypePreset').value]||EXAM_PRESETS.final;
+  document.getElementById('nxRcfTotal').value=preset.rcfTotal||'';
+  document.getElementById('nxRcfMaxFail').value=preset.rcfMaxFail!==undefined?preset.rcfMaxFail:'';
+  document.getElementById('nxEspTotal').value=preset.espTotal||'';
+  document.getElementById('nxEspMaxFail').value=preset.espMaxFail!==undefined?preset.espMaxFail:'';
+}
+
 let nxSelExamId=null,editNxExamId=null;
+
 function buildNxView(){
   const exams=loadNxExams().sort((a,b)=>{const da=a.date||'0000-00-00',db=b.date||'0000-00-00';return db.localeCompare(da);});
   const tabs=document.getElementById('nxTabs');tabs.innerHTML='';
@@ -943,87 +985,150 @@ function buildNxView(){
   const exam=exams.find(e=>e.id===nxSelExamId);if(!exam)return;
   const scores=loadNxScores().filter(s=>s.examId===nxSelExamId).sort((a,b)=>b.date.localeCompare(a.date));
   const latest=scores[0]||null;
+
+  // exam config with defaults
+  const rcfTotal=exam.rcfTotal||0;
+  const rcfMaxFail=exam.rcfMaxFail||0;
+  const espTotal=exam.espTotal||20;
+  const espMaxFail=exam.espMaxFail||7;
+  const hasRcf=rcfTotal>0;
+  const hasEsp=espTotal>0;
+  const totalPregs=(rcfTotal||0)+(espTotal||0);
+
   const eDate=exam.date?new Date(exam.date+'T12:00:00'):null;
   const dateLbl=eDate?`${DS[eDate.getDay()]} ${eDate.getDate()} ${MO[eDate.getMonth()]} ${eDate.getFullYear()}`:'Sin fecha';
+  const presetLbl=exam.presetLabel||'Examen';
+
+  // build score blocks HTML
+  let blocksHtml='';
+  if(hasRcf){
+    blocksHtml+=`<div class="score-block">
+      <div class="sb-accent" style="background:linear-gradient(90deg,var(--y),var(--o))"></div>
+      <div class="sb-title" style="color:var(--y)">RCF</div>
+      <div class="sb-rules">${rcfTotal} preg · máx ${rcfMaxFail} fallos<br>Mínimo: ${rcfTotal-rcfMaxFail} aciertos</div>
+      <div class="sb-inp-row">
+        <div class="sb-inp-wrap"><label>ACIERTOS</label><input class="sb-inp" type="number" id="rcfAc" min="0" max="${rcfTotal}" placeholder="—" value="${latest&&latest.rcfAc!==undefined?latest.rcfAc:''}" oninput="calcScore()"></div>
+        <div class="sb-inp-wrap"><label>FALLOS</label><input class="sb-inp" type="number" id="rcfFail" min="0" max="${rcfTotal}" placeholder="—" value="${latest&&latest.rcfFail!==undefined?latest.rcfFail:''}" oninput="calcScoreFromFail('rcf')"></div>
+      </div>
+      <div class="sb-result empty" id="rcfResult">—</div>
+    </div>`;
+  }
+  if(hasEsp){
+    blocksHtml+=`<div class="score-block" style="${!hasRcf?'grid-column:1/-1':''}">
+      <div class="sb-accent" style="background:linear-gradient(90deg,var(--b),var(--pu))"></div>
+      <div class="sb-title" style="color:var(--b)">ESPECÍFICAS</div>
+      <div class="sb-rules">${espTotal} preg · máx ${espMaxFail} fallos<br>Mínimo: ${espTotal-espMaxFail} aciertos</div>
+      <div class="sb-inp-row">
+        <div class="sb-inp-wrap"><label>ACIERTOS</label><input class="sb-inp" type="number" id="espAc" min="0" max="${espTotal}" placeholder="—" value="${latest&&latest.espAc!==undefined?latest.espAc:''}" oninput="calcScore()"></div>
+        <div class="sb-inp-wrap"><label>FALLOS</label><input class="sb-inp" type="number" id="espFail" min="0" max="${espTotal}" placeholder="—" value="${latest&&latest.espFail!==undefined?latest.espFail:''}" oninput="calcScoreFromFail('esp')"></div>
+      </div>
+      <div class="sb-result empty" id="espResult">—</div>
+    </div>`;
+  }
+
   entry.innerHTML=`
     <div class="nx-exam-hdr">
-      <div><div class="nx-exam-name">${exam.name}</div><div class="nx-exam-date">${dateLbl}</div></div>
+      <div>
+        <div class="nx-exam-name">${exam.name}</div>
+        <div class="nx-exam-date">${dateLbl} · <span style="color:var(--y)">${presetLbl}</span> · ${totalPregs} preguntas</div>
+      </div>
       <button class="nx-edit-btn" onclick="openEditNxExam('${exam.id}')">✎ EDITAR</button>
     </div>
-    <div class="score-blocks">
-      <div class="score-block">
-        <div class="sb-accent" style="background:linear-gradient(90deg,var(--y),var(--o))"></div>
-        <div class="sb-title" style="color:var(--y)">RCF</div>
-        <div class="sb-rules">60 preg · máx 12 fallos<br>Mínimo: 48 aciertos</div>
-        <div class="sb-inp-row">
-          <div class="sb-inp-wrap"><label>ACIERTOS</label><input class="sb-inp" type="number" id="rcfAc" min="0" max="60" placeholder="—" value="${latest?latest.rcfAc:''}" oninput="calcScore()"></div>
-          <div class="sb-inp-wrap"><label>FALLOS</label><input class="sb-inp" type="number" id="rcfFail" min="0" max="60" placeholder="—" value="${latest!==null?60-latest.rcfAc:''}" oninput="calcScoreFromFail('rcf')"></div>
-        </div>
-        <div class="sb-result empty" id="rcfResult">—</div>
-      </div>
-      <div class="score-block">
-        <div class="sb-accent" style="background:linear-gradient(90deg,var(--b),var(--pu))"></div>
-        <div class="sb-title" style="color:var(--b)">ESP.</div>
-        <div class="sb-rules">20 preg · máx 7 fallos<br>Mínimo: 13 aciertos</div>
-        <div class="sb-inp-row">
-          <div class="sb-inp-wrap"><label>ACIERTOS</label><input class="sb-inp" type="number" id="espAc" min="0" max="20" placeholder="—" value="${latest?latest.espAc:''}" oninput="calcScore()"></div>
-          <div class="sb-inp-wrap"><label>FALLOS</label><input class="sb-inp" type="number" id="espFail" min="0" max="20" placeholder="—" value="${latest!==null?20-latest.espAc:''}" oninput="calcScoreFromFail('esp')"></div>
-        </div>
-        <div class="sb-result empty" id="espResult">—</div>
-      </div>
-    </div>
+    <div class="score-blocks">${blocksHtml}</div>
     <div class="global-result empty-g" id="globalResult">
       <div class="gr-lbl">RESULTADO GLOBAL</div>
       <div class="gr-val" id="globalVal">—</div>
       <div class="gr-detail" id="globalDetail">Introduce las notas</div>
     </div>
     <button class="save-score-btn" onclick="saveScore()">💾 GUARDAR NOTA</button>`;
+
+  // store config on window for calcScore
+  window._examCfg={rcfTotal,rcfMaxFail,espTotal,espMaxFail,hasRcf,hasEsp,totalPregs};
   calcScore();
   buildAnalytics(exam,scores,analyticsWrap);
 }
+
 function calcScoreFromFail(part){
-  if(part==='rcf'){const f=parseInt(document.getElementById('rcfFail').value);if(!isNaN(f)&&f>=0&&f<=60)document.getElementById('rcfAc').value=60-f;}
-  else{const f=parseInt(document.getElementById('espFail').value);if(!isNaN(f)&&f>=0&&f<=20)document.getElementById('espAc').value=20-f;}
+  const cfg=window._examCfg||{rcfTotal:60,espTotal:20};
+  if(part==='rcf'){const f=parseInt(document.getElementById('rcfFail')?.value);if(!isNaN(f)&&f>=0)document.getElementById('rcfAc').value=cfg.rcfTotal-f;}
+  else{const f=parseInt(document.getElementById('espFail')?.value);if(!isNaN(f)&&f>=0)document.getElementById('espAc').value=cfg.espTotal-f;}
   calcScore();
 }
+
 function calcScore(){
-  const rcfAc=parseInt(document.getElementById('rcfAc').value),espAc=parseInt(document.getElementById('espAc').value);
-  if(!isNaN(rcfAc)&&document.activeElement.id!=='rcfFail')document.getElementById('rcfFail').value=60-rcfAc;
-  if(!isNaN(espAc)&&document.activeElement.id!=='espFail')document.getElementById('espFail').value=20-espAc;
+  const cfg=window._examCfg||{rcfTotal:60,rcfMaxFail:12,espTotal:20,espMaxFail:7,hasRcf:true,hasEsp:true,totalPregs:80};
+  const rcfAcEl=document.getElementById('rcfAc'),espAcEl=document.getElementById('espAc');
+  const rcfAc=rcfAcEl?parseInt(rcfAcEl.value):NaN;
+  const espAc=espAcEl?parseInt(espAcEl.value):NaN;
+  const rcfFailEl=document.getElementById('rcfFail'),espFailEl=document.getElementById('espFail');
+
+  if(rcfAcEl&&!isNaN(rcfAc)&&document.activeElement!==rcfFailEl&&rcfFailEl)rcfFailEl.value=cfg.rcfTotal-rcfAc;
+  if(espAcEl&&!isNaN(espAc)&&document.activeElement!==espFailEl&&espFailEl)espFailEl.value=cfg.espTotal-espAc;
+
   const rr=document.getElementById('rcfResult'),er=document.getElementById('espResult');
   const gr=document.getElementById('globalResult'),gv=document.getElementById('globalVal'),gd=document.getElementById('globalDetail');
-  if(isNaN(rcfAc)||rcfAc<0||rcfAc>60){rr.className='sb-result empty';rr.textContent='—';}
-  else{const f=60-rcfAc,p=f<=12;rr.className='sb-result '+(p?'pass':'fail');rr.textContent=p?`✓ ${rcfAc}/60 · ${f} fallos`:`✗ ${rcfAc}/60 · ${f} fallos`;}
-  if(isNaN(espAc)||espAc<0||espAc>20){er.className='sb-result empty';er.textContent='—';}
-  else{const f=20-espAc,p=f<=7;er.className='sb-result '+(p?'pass':'fail');er.textContent=p?`✓ ${espAc}/20 · ${f} fallos`:`✗ ${espAc}/20 · ${f} fallos`;}
-  if(!isNaN(rcfAc)&&!isNaN(espAc)&&rcfAc>=0&&rcfAc<=60&&espAc>=0&&espAc<=20){
-    const rf=60-rcfAc,ef=20-espAc,pass=rf<=12&&ef<=7;
+
+  let rcfPass=true,espPass=true,rcfOk=!cfg.hasRcf,espOk=!cfg.hasEsp;
+  if(cfg.hasRcf&&rr){
+    if(isNaN(rcfAc)||rcfAc<0||rcfAc>cfg.rcfTotal){rr.className='sb-result empty';rr.textContent='—';}
+    else{const f=cfg.rcfTotal-rcfAc;rcfPass=f<=cfg.rcfMaxFail;rcfOk=true;rr.className='sb-result '+(rcfPass?'pass':'fail');rr.textContent=rcfPass?`✓ ${rcfAc}/${cfg.rcfTotal} · ${f} fallos`:`✗ ${rcfAc}/${cfg.rcfTotal} · ${f} fallos`;}
+  }
+  if(cfg.hasEsp&&er){
+    if(isNaN(espAc)||espAc<0||espAc>cfg.espTotal){er.className='sb-result empty';er.textContent='—';}
+    else{const f=cfg.espTotal-espAc;espPass=f<=cfg.espMaxFail;espOk=true;er.className='sb-result '+(espPass?'pass':'fail');er.textContent=espPass?`✓ ${espAc}/${cfg.espTotal} · ${f} fallos`:`✗ ${espAc}/${cfg.espTotal} · ${f} fallos`;}
+  }
+  if(rcfOk&&espOk){
+    const pass=rcfPass&&espPass;
+    const rcfV=!isNaN(rcfAc)?rcfAc:null,espV=!isNaN(espAc)?espAc:null;
+    const total=(rcfV||0)+(espV||0);
     gr.className='global-result '+(pass?'pass-g':'fail-g');
     gv.textContent=pass?'✓ APROBADO':'✗ SUSPENSO';
-    gd.textContent=`Total ${rcfAc+espAc}/80 · RCF ${rcfAc}/60 · Esp ${espAc}/20`;
+    let detail='';
+    if(cfg.hasRcf&&rcfV!==null)detail+=`RCF ${rcfV}/${cfg.rcfTotal}`;
+    if(cfg.hasEsp&&espV!==null)detail+=(detail?' · ':'')+`Esp ${espV}/${cfg.espTotal}`;
+    if(cfg.hasRcf&&cfg.hasEsp)detail=`Total ${total}/${cfg.totalPregs} · `+detail;
+    gd.textContent=detail;
   }else{gr.className='global-result empty-g';gv.textContent='—';gd.textContent='Introduce las notas';}
 }
+
 function saveScore(){
-  const rcfAc=parseInt(document.getElementById('rcfAc').value),espAc=parseInt(document.getElementById('espAc').value);
-  if(isNaN(rcfAc)||isNaN(espAc))return alert('Introduce los aciertos de RCF y Específicas');
-  if(rcfAc<0||rcfAc>60||espAc<0||espAc>20)return alert('Valores fuera de rango');
+  const cfg=window._examCfg||{};
+  const rcfAcEl=document.getElementById('rcfAc'),espAcEl=document.getElementById('espAc');
+  const rcfAc=rcfAcEl?parseInt(rcfAcEl.value):null;
+  const espAc=espAcEl?parseInt(espAcEl.value):null;
+  if(cfg.hasRcf&&(isNaN(rcfAc)||rcfAc===null))return alert('Introduce los aciertos de RCF');
+  if(cfg.hasEsp&&(isNaN(espAc)||espAc===null))return alert('Introduce los aciertos de Específicas');
   const scores=loadNxScores();
-  scores.push({id:genId(),examId:nxSelExamId,date:todayKey(),rcfAc,espAc,rcfFail:60-rcfAc,espFail:20-espAc});
-  saveNxScores(scores);buildNxView();
+  const entry={id:genId(),examId:nxSelExamId,date:todayKey()};
+  if(cfg.hasRcf){entry.rcfAc=rcfAc;entry.rcfFail=cfg.rcfTotal-rcfAc;}
+  if(cfg.hasEsp){entry.espAc=espAc;entry.espFail=cfg.espTotal-espAc;}
+  scores.push(entry);saveNxScores(scores);buildNxView();
 }
+
 function buildAnalytics(exam,examScores,wrap){
   wrap.innerHTML='';
   if(examScores.length===0){wrap.innerHTML='<div class="hist-empty">SIN NOTAS AÚN · GUARDA TU PRIMERA NOTA</div>';return;}
-  const total=examScores.length,passed=examScores.filter(s=>s.rcfFail<=12&&s.espFail<=7).length;
-  const avgRcf=Math.round(examScores.reduce((a,s)=>a+s.rcfAc,0)/total);
-  const avgEsp=Math.round(examScores.reduce((a,s)=>a+s.espAc,0)/total);
+  const rcfTotal=exam.rcfTotal||0,rcfMaxFail=exam.rcfMaxFail||0;
+  const espTotal=exam.espTotal||20,espMaxFail=exam.espMaxFail||7;
+  const hasRcf=rcfTotal>0,hasEsp=espTotal>0;
+  const totalPregs=(rcfTotal||0)+(espTotal||0);
+  const isPassed=s=>((!hasRcf||(s.rcfFail!==undefined&&s.rcfFail<=rcfMaxFail))&&(!hasEsp||(s.espFail!==undefined&&s.espFail<=espMaxFail)));
+  const total=examScores.length,passed=examScores.filter(isPassed).length;
   const passRate=Math.round(passed/total*100);
+  let avgRcfHtml='',avgEspHtml='';
+  if(hasRcf){
+    const av=Math.round(examScores.filter(s=>s.rcfAc!==undefined).reduce((a,s)=>a+s.rcfAc,0)/total);
+    avgRcfHtml=`<div class="astat"><div class="astat-lbl">MEDIA RCF</div><div class="astat-val" style="font-size:28px;background:var(--grad-y);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${av}<span style="font-size:14px;color:var(--muted)">/${rcfTotal}</span></div><div class="astat-sub">${rcfTotal-av} fallos medios</div></div>`;
+  }
+  if(hasEsp){
+    const av=Math.round(examScores.filter(s=>s.espAc!==undefined).reduce((a,s)=>a+s.espAc,0)/total);
+    avgEspHtml=`<div class="astat"><div class="astat-lbl">MEDIA ESP.</div><div class="astat-val" style="font-size:28px;background:var(--grad-b);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${av}<span style="font-size:14px;color:var(--muted)">/${espTotal}</span></div><div class="astat-sub">${espTotal-av} fallos medios</div></div>`;
+  }
   const sg=document.createElement('div');sg.className='astat-grid';
   sg.innerHTML=`
     <div class="astat"><div class="astat-lbl">INTENTOS</div><div class="astat-val" style="background:var(--grad-y);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${total}</div><div class="astat-sub">notas guardadas</div></div>
     <div class="astat"><div class="astat-lbl">APROBADOS</div><div class="astat-val" style="background:${passed>0?'var(--grad-g)':'var(--grad-r)'};-webkit-background-clip:text;-webkit-text-fill-color:transparent">${passed}</div><div class="astat-sub">${passRate}% de acierto</div></div>
-    <div class="astat"><div class="astat-lbl">MEDIA RCF</div><div class="astat-val" style="font-size:28px;background:var(--grad-y);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${avgRcf}<span style="font-size:14px;color:var(--muted)">/60</span></div><div class="astat-sub">${60-avgRcf} fallos medios</div></div>
-    <div class="astat"><div class="astat-lbl">MEDIA ESP.</div><div class="astat-val" style="font-size:28px;background:var(--grad-b);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${avgEsp}<span style="font-size:14px;color:var(--muted)">/20</span></div><div class="astat-sub">${20-avgEsp} fallos medios</div></div>
+    ${avgRcfHtml}${avgEspHtml}
     <div class="astat wide">
       <div class="astat-lbl">EVOLUCIÓN — últimas ${Math.min(total,8)} notas</div>
       <div class="bar-chart" id="barChart"></div>
@@ -1033,54 +1138,79 @@ function buildAnalytics(exam,examScores,wrap){
     const bc=document.getElementById('barChart');if(!bc)return;
     const last8=[...examScores].slice(0,8).reverse();
     last8.forEach(s=>{
-      const pts=s.rcfAc+s.espAc,pct=pts/80*100,pass=s.rcfFail<=12&&s.espFail<=7;
+      const pts=(s.rcfAc||0)+(s.espAc||0),pct=pts/totalPregs*100,pass=isPassed(s);
       const col=document.createElement('div');col.className='bar-col';
       col.innerHTML=`<div class="bar-fill" style="height:${pct}%;background:${pass?'var(--grad-g)':'var(--grad-r)'};opacity:.85"></div><div class="bar-lbl">${pts}</div>`;
       bc.appendChild(col);
     });
-    const threshPct=100-(61/80*100);
+    const minPts=(rcfTotal-rcfMaxFail)+(espTotal-espMaxFail);
+    const threshPct=100-(minPts/totalPregs*100);
     const tl=document.createElement('div');tl.className='bar-threshold';tl.style.top=threshPct+'%';
-    tl.innerHTML='<span class="bar-threshold-lbl">mín 61</span>';
-    bc.appendChild(tl);
+    tl.innerHTML=`<span class="bar-threshold-lbl">mín ${minPts}</span>`;bc.appendChild(tl);
   },0);
   const hh=document.createElement('div');hh.innerHTML='<div class="upc-month-hdr">HISTORIAL</div>';wrap.appendChild(hh);
   const hl=document.createElement('div');hl.className='history-list';
   examScores.forEach(s=>{
-    const pass=s.rcfFail<=12&&s.espFail<=7;
+    const pass=isPassed(s);
     const item=document.createElement('div');item.className='hist-item';item.style.borderLeftColor=`var(--${pass?'g':'r'})`;
     const d=new Date(s.date+'T12:00:00');
+    let scoresHtml='';
+    if(hasRcf&&s.rcfAc!==undefined)scoresHtml+=`<div class="hist-score" style="color:var(--${s.rcfFail<=rcfMaxFail?'g':'r'})">RCF ${s.rcfAc}/${rcfTotal} · ${s.rcfFail}f</div>`;
+    if(hasEsp&&s.espAc!==undefined)scoresHtml+=`<div class="hist-score" style="color:var(--${s.espFail<=espMaxFail?'g':'r'})">Esp ${s.espAc}/${espTotal} · ${s.espFail}f</div>`;
+    const totalPts=(s.rcfAc||0)+(s.espAc||0);
+    if(hasRcf&&hasEsp)scoresHtml+=`<div class="hist-score" style="color:var(--muted)">Total ${totalPts}/${totalPregs}</div>`;
     item.innerHTML=`<div class="hist-top">
       <div class="hist-name">${DS[d.getDay()]} ${d.getDate()} ${MO[d.getMonth()]} ${d.getFullYear()}</div>
       <div class="hist-verdict" style="color:var(--${pass?'g':'r'})">${pass?'✓ APTO':'✗ NO APTO'}</div>
-    </div>
-    <div class="hist-scores">
-      <div class="hist-score" style="color:var(--${s.rcfFail<=12?'g':'r'})">RCF ${s.rcfAc}/60 · ${s.rcfFail}f</div>
-      <div class="hist-score" style="color:var(--${s.espFail<=7?'g':'r'})">ESP ${s.espAc}/20 · ${s.espFail}f</div>
-      <div class="hist-score" style="color:var(--muted)">Total ${s.rcfAc+s.espAc}/80</div>
-    </div>`;
+    </div><div class="hist-scores">${scoresHtml}</div>`;
     item.onclick=()=>{if(confirm('¿Borrar esta nota?')){saveNxScores(loadNxScores().filter(x=>x.id!==s.id));buildNxView();}};
     hl.appendChild(item);
   });
   wrap.appendChild(hl);
 }
+
 function openAddNxExam(){
   editNxExamId=null;document.getElementById('nxExamTitle').textContent='NUEVO EXAMEN';
   document.getElementById('nxExamDelBtn').style.display='none';
-  document.getElementById('nxExamName').value='';document.getElementById('nxExamDate').value=todayKey();openOv('ov-nxexam');
+  document.getElementById('nxExamName').value='';
+  document.getElementById('nxExamDate').value=todayKey();
+  document.getElementById('nxExamTypePreset').value='final';
+  applyExamPreset();
+  openOv('ov-nxexam');
 }
+
 function openEditNxExam(id){
   const ex=loadNxExams().find(e=>e.id===id);if(!ex)return;editNxExamId=id;
   document.getElementById('nxExamTitle').textContent='EDITAR EXAMEN';
   document.getElementById('nxExamDelBtn').style.display='block';
-  document.getElementById('nxExamName').value=ex.name;document.getElementById('nxExamDate').value=ex.date||'';openOv('ov-nxexam');
+  document.getElementById('nxExamName').value=ex.name;
+  document.getElementById('nxExamDate').value=ex.date||'';
+  // detect preset
+  const preset=ex.preset||'custom';
+  document.getElementById('nxExamTypePreset').value=preset;
+  document.getElementById('nxRcfTotal').value=ex.rcfTotal||0;
+  document.getElementById('nxRcfMaxFail').value=ex.rcfMaxFail||0;
+  document.getElementById('nxEspTotal').value=ex.espTotal||0;
+  document.getElementById('nxEspMaxFail').value=ex.espMaxFail||0;
+  openOv('ov-nxexam');
 }
+
 function saveNxExam(){
   const name=document.getElementById('nxExamName').value.trim();if(!name)return;
-  const date=document.getElementById('nxExamDate').value,exams=loadNxExams();
-  if(editNxExamId){const i=exams.findIndex(e=>e.id===editNxExamId);if(i>=0){exams[i].name=name;exams[i].date=date;}}
-  else{const ne={id:genId(),name,date};exams.push(ne);nxSelExamId=ne.id;}
+  const date=document.getElementById('nxExamDate').value;
+  const preset=document.getElementById('nxExamTypePreset').value;
+  const rcfTotal=parseInt(document.getElementById('nxRcfTotal').value)||0;
+  const rcfMaxFail=parseInt(document.getElementById('nxRcfMaxFail').value)||0;
+  const espTotal=parseInt(document.getElementById('nxEspTotal').value)||0;
+  const espMaxFail=parseInt(document.getElementById('nxEspMaxFail').value)||0;
+  const presetLabel=EXAM_PRESETS[preset]?.label||'Personalizado';
+  const exams=loadNxExams();
+  const obj={id:editNxExamId||genId(),name,date,preset,presetLabel,rcfTotal,rcfMaxFail,espTotal,espMaxFail};
+  if(editNxExamId){const i=exams.findIndex(e=>e.id===editNxExamId);if(i>=0)exams[i]=obj;}
+  else{exams.push(obj);nxSelExamId=obj.id;}
   saveNxExams(exams);closeOv('ov-nxexam');buildNxView();
 }
+
 function deleteNxExam(){
   if(!editNxExamId||!confirm('¿Borrar este examen y todas sus notas?'))return;
   saveNxExams(loadNxExams().filter(e=>e.id!==editNxExamId));
@@ -1088,7 +1218,6 @@ function deleteNxExam(){
   const rem=loadNxExams();nxSelExamId=rem.length>0?rem[0].id:null;
   closeOv('ov-nxexam');buildNxView();
 }
-
 // ── ESTUDIO ──
 const TODAY=new Date();
 let selDow=TODAY.getDay();if(selDow===0||selDow===6)selDow=1;
