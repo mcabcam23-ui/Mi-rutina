@@ -737,7 +737,7 @@ function tick(){
   const agEvs=loadAgEvs(),today0=todayKey();
   const nextExam=agEvs.filter(e=>e.type==='exam'&&e.date>=today0).sort((a,b)=>a.date.localeCompare(b.date))[0];
   if(nextExam){
-    const diff=Math.round((new Date(nextExam.date+'T12:00:00')-new Date(now.toDateString()))/864e5);
+    const diff=Math.round((new Date(nextExam.date+'T00:00:00')-new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()))/864e5);
     document.getElementById('examVal').textContent=diff===0?'HOY':diff;
     document.getElementById('examSub').textContent=nextExam.name.length>22?nextExam.name.slice(0,20)+'…':nextExam.name;
   }else{document.getElementById('examVal').textContent='—';document.getElementById('examSub').textContent='sin exámenes próximos';}
@@ -894,7 +894,7 @@ function buildAgenda(){
 function buildAgEvCard(ev){
   const t=AG_TYPES[ev.type]||AG_TYPES.otro;
   const card=document.createElement('div');card.className='agev-card';card.style.borderLeftColor=`var(--${t.color})`;
-  const evD=new Date(ev.date+'T12:00:00');const now0=new Date();now0.setHours(0,0,0,0);
+  const evD=new Date(ev.date+'T00:00:00');const now0=new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
   const diff=Math.round((evD-now0)/864e5);
   let cdHtml='';
   if(diff===0)cdHtml=`<div class="agev-cd today">🔴 HOY</div>`;
@@ -1298,6 +1298,31 @@ function importData(e){
   reader.readAsText(file);
 }
 
+// ── NOTIFICATIONS ──
+function requestNotifPermission(){
+  if(!('Notification' in window))return;
+  if(Notification.permission==='default')Notification.requestPermission();
+}
+function checkExamNotifications(){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  const agEvs=loadAgEvs();
+  const today0=new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
+  const alerted=L('notifSent',[]);
+  agEvs.filter(e=>e.type==='exam').forEach(ev=>{
+    const evD=new Date(ev.date+'T00:00:00');
+    const diff=Math.round((evD-today0)/864e5);
+    const keyToday=`today_${ev.id}_${todayKey()}`;
+    const keyTomorrow=`tomorrow_${ev.id}_${todayKey()}`;
+    if(diff===0&&!alerted.includes(keyToday)){
+      new Notification('🔴 EXAMEN HOY',{body:`${ev.name} es hoy. ¡Mucho ánimo!`});
+      alerted.push(keyToday);S('notifSent',alerted);
+    }else if(diff===1&&!alerted.includes(keyTomorrow)){
+      new Notification('⚠️ EXAMEN MAÑANA',{body:`${ev.name} es mañana. Repasa esta noche.`});
+      alerted.push(keyTomorrow);S('notifSent',alerted);
+    }
+  });
+}
+
 // ── OVERLAYS & NAV ──
 function openOv(id){document.getElementById(id).classList.add('open');}
 function closeOv(id){document.getElementById(id).classList.remove('open');}
@@ -1314,7 +1339,12 @@ function sw(name,btn){
 }
 
 // ── INIT ──
-sortEvs();buildTimeline();initNotes();buildChecklist();buildWeekTabs();buildStudyDay();buildAgenda();buildNxView();tick();setInterval(tick,1000);
+sortEvs();buildTimeline();initNotes();buildChecklist();buildWeekTabs();buildStudyDay();buildAgenda();buildNxView();
+requestNotifPermission();
+tick();
+setInterval(tick,1000);
+setInterval(checkExamNotifications,60000);
+setTimeout(checkExamNotifications,2000);
 </script>
 </body>
 </html>
