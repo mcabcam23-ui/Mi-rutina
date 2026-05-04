@@ -422,12 +422,12 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
     </div>
   </div>
 
-  <div class="day-prog-card">
+  <div class="day-prog-card" id="dayProgCard">
     <div class="dp-row"><span id="progStart">06:40</span><span id="progPct">0%</span><span id="progEnd">21:00</span></div>
     <div class="dp-track"><div class="dp-fill" id="dayProg" style="width:0%"></div></div>
   </div>
 
-  <div class="free-row" id="freeChips"></div>
+  <div class="free-row" id="freeChipsRow"></div>
 
   <div class="stat-row">
     <div class="stat-w streak-w" onclick="markDayDone()">
@@ -442,18 +442,18 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
     </div>
   </div>
 
-  <div class="tl-section">
+  <div class="tl-section" id="tlSection">
     <div class="sec-hdr">EVENTOS DEL DÍA</div>
     <div class="timeline" id="timeline"></div>
     <button class="add-ev-btn" onclick="openAddEvent()">＋ AÑADIR EVENTO</button>
   </div>
 
-  <div class="notes-section">
+  <div class="notes-section" id="notesSection">
     <div class="sec-hdr">NOTAS DEL DÍA</div>
     <textarea class="notes-area" id="notesArea" placeholder="Escribe algo sobre hoy..." rows="3"></textarea>
   </div>
 
-  <div class="check-section">
+  <div class="check-section" id="checkSection">
     <div class="sec-hdr">TAREAS DE HOY</div>
     <div class="check-list" id="checkList"></div>
     <div class="add-check">
@@ -503,9 +503,14 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
     <div class="st-hero-title">PLAN DE<br><em>ESTUDIO</em></div>
     <div class="st-hero-sub">16:00–18:00 · REPASO &nbsp;|&nbsp; 18:00–19:00 · LIBRE &nbsp;|&nbsp; 20:00–21:00 · GYM</div>
   </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;background:var(--panel);border-bottom:1px solid var(--border);padding:8px 14px;">
+    <button class="mnav-btn" onclick="studyWeekPrev()">‹</button>
+    <div id="studyWeekLabel" style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:var(--text)">—</div>
+    <button class="mnav-btn" onclick="studyWeekNext()">›</button>
+  </div>
   <div class="week-tabs" id="weekTabs"></div>
   <div id="studyDay"></div>
-  <div class="wstrip"><div class="ws-hdr">ESTA SEMANA</div><div class="dchips" id="dchips"></div></div>
+  <div class="wstrip"><div class="ws-hdr">DÍAS DE LA SEMANA</div><div class="dchips" id="dchips"></div></div>
 </div>
 
 <!-- ══ CONSEJOS ══ -->
@@ -699,6 +704,28 @@ function tick(){
   document.getElementById('hDate').textContent=`${now.getDate()} ${MO[now.getMonth()]}`;
   const isWD=dow>=1&&dow<=5;
   document.getElementById('wkndBanner').classList.toggle('show',!isWD);
+  // Hide/show routine sections on weekends
+  ['dayProgCard','freeChipsRow','tlSection','notesSection','checkSection'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display=isWD?'':'none';
+  });
+  // Streak
+  const streak=L('streak',{count:0,last:''});
+  document.getElementById('streakVal').textContent=streak.count;
+  document.getElementById('streakSub').textContent=(streak.count===1?'día seguido':'días seguidos')+' · toca para sumar';
+  // Exam countdown
+  const agEvs=loadAgEvs(),today0=todayKey();
+  const nextExam=agEvs.filter(e=>e.type==='exam'&&e.date>=today0).sort((a,b)=>a.date.localeCompare(b.date))[0];
+  if(nextExam){
+    const diff=Math.round((new Date(nextExam.date+'T00:00:00')-new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()))/864e5);
+    document.getElementById('examVal').textContent=diff===0?'HOY':diff;
+    document.getElementById('examSub').textContent=nextExam.name.length>22?nextExam.name.slice(0,20)+'…':nextExam.name;
+  }else{document.getElementById('examVal').textContent='—';document.getElementById('examSub').textContent='sin exámenes próximos';}
+  if(!isWD){
+    document.getElementById('nextName').textContent='Fin de semana 🎉';
+    document.getElementById('nextTime').textContent='Descansa y recarga';
+    document.getElementById('nextCd').textContent='';
+    return;
+  }
   const sorted=[...events].sort((a,b)=>toM(a.start)-toM(b.start));
   const first=toM(sorted[0]?.start||'06:40'),last=toM(sorted[sorted.length-1]?.end||'21:00');
   const pct=Math.max(0,Math.min(100,(nowM-first)/(last-first)*100));
@@ -706,7 +733,7 @@ function tick(){
   document.getElementById('progPct').textContent=Math.round(pct)+'%';
   document.getElementById('progStart').textContent=sorted[0]?.start||'06:40';
   document.getElementById('progEnd').textContent=sorted[sorted.length-1]?.end||'21:00';
-  const fc=document.getElementById('freeChips');fc.innerHTML='';
+  const fc=document.getElementById('freeChipsRow');fc.innerHTML='';
   if(isWD)getFreeSlots().forEach(sl=>{const ch=document.createElement('div');ch.className='fchip';ch.textContent=`⬜ ${sl.start}–${sl.end} · ${sl.mins}min`;fc.appendChild(ch);});
   let nextEv=null,activeEv=null;
   sorted.forEach(ev=>{
@@ -731,16 +758,6 @@ function tick(){
     document.getElementById('nextTime').textContent='¡Buen trabajo hoy!';
     document.getElementById('nextCd').textContent='';
   }
-  const streak=L('streak',{count:0,last:''});
-  document.getElementById('streakVal').textContent=streak.count;
-  document.getElementById('streakSub').textContent=(streak.count===1?'día seguido':'días seguidos')+' · toca para sumar';
-  const agEvs=loadAgEvs(),today0=todayKey();
-  const nextExam=agEvs.filter(e=>e.type==='exam'&&e.date>=today0).sort((a,b)=>a.date.localeCompare(b.date))[0];
-  if(nextExam){
-    const diff=Math.round((new Date(nextExam.date+'T00:00:00')-new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()))/864e5);
-    document.getElementById('examVal').textContent=diff===0?'HOY':diff;
-    document.getElementById('examSub').textContent=nextExam.name.length>22?nextExam.name.slice(0,20)+'…':nextExam.name;
-  }else{document.getElementById('examVal').textContent='—';document.getElementById('examSub').textContent='sin exámenes próximos';}
 }
 
 // ── TIMELINE ──
@@ -1222,22 +1239,46 @@ function deleteNxExam(){
 }
 // ── ESTUDIO ──
 const TODAY=new Date();
-let selDow=TODAY.getDay();if(selDow===0||selDow===6)selDow=1;
+let selDow=TODAY.getDay();
+let studyWeekOffset=(TODAY.getDay()===0||TODAY.getDay()===6)?1:0;
+if(selDow===0||selDow===6)selDow=1;
 let pickerDow=null;
+
+function getStudyMonday(){
+  const mon=getMonday(TODAY);
+  mon.setDate(mon.getDate()+studyWeekOffset*7);
+  return mon;
+}
+function wKeyOffset(dow){
+  const mon=getStudyMonday();
+  return`sub_${mon.toISOString().slice(0,10)}_${dow}`;
+}
+function loadSubOffset(dow){return L(wKeyOffset(dow),null);}
+function saveSubOffset(dow,sid){S(wKeyOffset(dow),sid);}
+function studyWeekPrev(){studyWeekOffset--;selDow=1;buildWeekTabs();buildStudyDay();}
+function studyWeekNext(){studyWeekOffset++;selDow=1;buildWeekTabs();buildStudyDay();}
+
 function buildWeekTabs(){
   const tabs=document.getElementById('weekTabs');tabs.innerHTML='';
-  const mon=getMonday(TODAY);
+  const mon=getStudyMonday();
+  const sun=new Date(mon);sun.setDate(mon.getDate()+4);
+  const lbl=document.getElementById('studyWeekLabel');
+  if(lbl){
+    let label=studyWeekOffset===0?'ESTA SEMANA':studyWeekOffset===1?'PRÓXIMA SEMANA':studyWeekOffset===-1?'SEMANA ANTERIOR':`${mon.getDate()} ${MO[mon.getMonth()]} – ${sun.getDate()} ${MO[sun.getMonth()]}`;
+    lbl.textContent=label;
+  }
   for(let i=1;i<=5;i++){
     const d=new Date(mon);d.setDate(mon.getDate()+(i-1));
+    const isToday=d.toDateString()===new Date().toDateString();
     const btn=document.createElement('button');
-    btn.className='wtab'+(i===selDow?' sel':'')+(d.toDateString()===TODAY.toDateString()?' istoday':'');
+    btn.className='wtab'+(i===selDow?' sel':'')+(isToday?' istoday':'');
     btn.innerHTML=`<div class="wd">${DS[i]}</div><div class="wn">${d.getDate()}</div>`;
     btn.onclick=()=>{selDow=i;buildWeekTabs();buildStudyDay();};tabs.appendChild(btn);
   }
 }
 function buildStudyDay(){
   const plan=document.getElementById('studyDay');plan.innerHTML='';
-  const sid=loadSub(selDow),s=subInfo(sid);
+  const sid=loadSubOffset(selDow),s=subInfo(sid);
   const b1=document.createElement('div');b1.className='sblock block-repaso';
   b1.innerHTML=`<div class="sb-hdr"><div class="sb-lbl" style="color:var(--y)">📖 REPASO DEL DÍA</div><div class="sb-time">16:00–18:00</div></div><div class="sb-desc">Repasa lo dado en clase ese día. Apuntes, esquemas, preguntas clave.</div><span class="pill fixed">⏱️ 2h · Materia del día</span>`;
   plan.appendChild(b1);
@@ -1252,12 +1293,13 @@ function buildStudyDay(){
 }
 function buildDayChips(){
   const dc=document.getElementById('dchips');dc.innerHTML='';
-  const mon=getMonday(TODAY);
+  const mon=getStudyMonday();
   for(let i=1;i<=5;i++){
     const d=new Date(mon);d.setDate(mon.getDate()+(i-1));
-    const sid=loadSub(i),s=subInfo(sid);
-    const ch=document.createElement('div');ch.className='dchip'+(d.toDateString()===TODAY.toDateString()?' tc':'');
-    ch.innerHTML=`<div class="cd">${DS[i]}</div><div class="cs">${s?s.icon+' '+s.label:'—'}</div>`;
+    const sid=loadSubOffset(i),s=subInfo(sid);
+    const isToday=d.toDateString()===new Date().toDateString();
+    const ch=document.createElement('div');ch.className='dchip'+(isToday?' tc':'');
+    ch.innerHTML=`<div class="cd">${DS[i]} ${d.getDate()}</div><div class="cs">${s?s.icon+' '+s.label:'—'}</div>`;
     ch.onclick=()=>{selDow=i;buildWeekTabs();buildStudyDay();};dc.appendChild(ch);
   }
 }
@@ -1265,9 +1307,9 @@ function openSubPicker(dow){
   pickerDow=dow;document.getElementById('subSheetSub').textContent=`${DF[dow]} · 18:00–19:00`;
   const grid=document.getElementById('sgrid');grid.innerHTML='';
   SUBJECTS.forEach(s=>{
-    const btn=document.createElement('button');btn.className='sbtn'+(loadSub(dow)===s.id?' sel':'');
+    const btn=document.createElement('button');btn.className='sbtn'+(loadSubOffset(dow)===s.id?' sel':'');
     btn.innerHTML=`<span class="si">${s.icon}</span>${s.label}`;
-    btn.onclick=()=>{saveSub(pickerDow,s.id);closeOv('ov-subject');buildStudyDay();};grid.appendChild(btn);
+    btn.onclick=()=>{saveSubOffset(pickerDow,s.id);closeOv('ov-subject');buildStudyDay();};grid.appendChild(btn);
   });
   openOv('ov-subject');
 }
