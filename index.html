@@ -1826,59 +1826,145 @@ function sw(name,btn){
 // POMODORO
 // ══════════════════════════════════════════
 const POMO_PHASES=[
-  {name:'ESTUDIO',      dur:50*60, color:'var(--y)'},
-  {name:'DESCANSO',     dur:10*60, color:'var(--g)'},
-  {name:'ESTUDIO',      dur:50*60, color:'var(--y)'},
-  {name:'DESCANSO LARGO',dur:20*60,color:'var(--b)'},
+  {name:'ESTUDIO',      dur:50*60, color:'var(--y)', emoji:'📚'},
+  {name:'DESCANSO',     dur:10*60, color:'var(--g)', emoji:'☕'},
+  {name:'ESTUDIO',      dur:50*60, color:'var(--y)', emoji:'📚'},
+  {name:'DESCANSO LARGO',dur:20*60,color:'var(--b)', emoji:'🛋️'},
 ];
 let pomoPhaseIdx=0,pomoSecsLeft=POMO_PHASES[0].dur,pomoRunning=false;
 let pomoWorker=null,pomoStartTime=null,pomoStartSecs=null;
+let activeNotif=null;
+
+// ── Persist & restore state across app close/reopen ──
+function pomoSaveState(){
+  S('pomoState',{
+    phaseIdx:pomoPhaseIdx,
+    secsLeft:pomoSecsLeft,
+    running:pomoRunning,
+    startTime:pomoStartTime,
+    startSecs:pomoStartSecs,
+  });
+}
+function pomoRestoreState(){
+  const st=L('pomoState',null);
+  if(!st)return;
+  pomoPhaseIdx=st.phaseIdx||0;
+  pomoRunning=st.running||false;
+  pomoStartTime=st.startTime||null;
+  pomoStartSecs=st.startSecs||POMO_PHASES[0].dur;
+  if(pomoRunning&&pomoStartTime){
+    // Calculate real elapsed since state was saved
+    const elapsed=Math.round((Date.now()-pomoStartTime)/1000);
+    let remaining=pomoStartSecs-elapsed;
+    // Handle multiple phase rollovers while app was closed
+    while(remaining<=0){
+      pomoPhaseIdx=(pomoPhaseIdx+1)%POMO_PHASES.length;
+      remaining+=POMO_PHASES[pomoPhaseIdx].dur;
+    }
+    pomoSecsLeft=remaining;
+    pomoStartSecs=remaining;
+    pomoStartTime=Date.now();
+    // Resume worker
+    if(!pomoWorker)pomoWorker=createPomoWorker();
+    pomoWorker.onmessage=pomoOnTick;
+    pomoWorker.postMessage('start');
+  }else{
+    pomoSecsLeft=st.secsLeft||POMO_PHASES[pomoPhaseIdx].dur;
+    pomoRunning=false;
+  }
+}
 
 function createPomoWorker(){
-  const code=`let iv=null;self.onmessage=function(e){if(e.data==='start'){iv=setInterval(()=>self.postMessage('tick'),1000);}else if(e.data==='stop'){clearInterval(iv);iv=null;}};`;
+  const code='let iv=null;self.onmessage=function(e){if(e.data==="start"){iv=setInterval(()=>self.postMessage("tick"),1000);}else if(e.data==="stop"){clearInterval(iv);iv=null;}};';
   return new Worker(URL.createObjectURL(new Blob([code],{type:'application/javascript'})));
+}
+
+// ── Persistent notification (stays until dismissed) ──
+function showPomoNotif(title,body,tag){
+  if(Notification.permission!=='granted')return;
+  // Close previous if exists
+  if(activeNotif){try{activeNotif.close();}catch(e){}}
+  activeNotif=new Notification(title,{
+    body,tag,
+    requireInteraction:true,   // stays open until user dismisses
+    renotify:true,
+    silent:false,
+  });
+  activeNotif.onclick=()=>{activeNotif.close();};
+}
+
+function pomoOnTick(){
+  const elapsed=Math.round((Date.now()-pomoStartTime)/1000);
+  pomoSecsLeft=Math.max(0,pomoStartSecs-elapsed);
+  if(pomoSecsLeft<=0){
+    // Phase ended
+    pomoPhaseIdx=(pomoPhaseIdx+1)%POMO_PHASES.length;
+    const p=POMO_PHASES[pomoPhaseIdx];
+    pomoSecsLeft=p.dur;
+    pomoStartTime=Date.now();
+    pomoStartSecs=p.dur;
+    // Persistent notification for new phase
+    const isStudy=p.name.includes('ESTUDIO');
+    showPomoNotif(
+      isStudy?'📚 ¡Hora de estudiar!':'☕ Tiempo de descanso',
+      `${p.emoji} ${p.name} · ${p.dur/60} minutos`,
+      'pomo-phase'
+    );
+    // Vibrate if supported
+    if('vibrate' in navigator)navigator.vibrate(isStudy?[200,100,200]:[400]);
+  }
+  pomoSaveState();
+  updatePomoUI();
 }
 
 function pomoToggle(){
   if(pomoRunning){
-    if(pomoStartTime){const elapsed=Math.round((Date.now()-pomoStartTime)/1000);pomoSecsLeft=Math.max(0,pomoStartSecs-elapsed);}
+    // Pause
+    if(pomoStartTime){
+      const elapsed=Math.round((Date.now()-pomoStartTime)/1000);
+      pomoSecsLeft=Math.max(0,pomoStartSecs-elapsed);
+    }
     if(pomoWorker)pomoWorker.postMessage('stop');
     pomoRunning=false;
+    if(activeNotif){try{activeNotif.close();}catch(e){}}
     document.getElementById('pomoBtnStart').textContent='▶';
     document.getElementById('pomoBtnStart').classList.remove('active');
   }else{
-    pomoStartTime=Date.now();pomoStartSecs=pomoSecsLeft;
+    // Start / resume
+    pomoStartTime=Date.now();
+    pomoStartSecs=pomoSecsLeft;
     if(!pomoWorker){
       pomoWorker=createPomoWorker();
-      pomoWorker.onmessage=()=>{
-        const elapsed=Math.round((Date.now()-pomoStartTime)/1000);
-        pomoSecsLeft=Math.max(0,pomoStartSecs-elapsed);
-        if(pomoSecsLeft<=0){
-          pomoPhaseIdx=(pomoPhaseIdx+1)%POMO_PHASES.length;
-          pomoSecsLeft=POMO_PHASES[pomoPhaseIdx].dur;
-          pomoStartTime=Date.now();pomoStartSecs=pomoSecsLeft;
-          if(Notification.permission==='granted'){
-            const p=POMO_PHASES[pomoPhaseIdx];
-            new Notification(p.name.includes('ESTUDIO')?'📚 ¡A estudiar!':'☕ Descansa',{body:`${p.dur/60} minutos`});
-          }
-        }
-        updatePomoUI();
-      };
+      pomoWorker.onmessage=pomoOnTick;
     }
     pomoWorker.postMessage('start');
     pomoRunning=true;
     document.getElementById('pomoBtnStart').textContent='⏸';
     document.getElementById('pomoBtnStart').classList.add('active');
+    // Show persistent notification so puedes ver el tiempo aunque salgas
+    const p=POMO_PHASES[pomoPhaseIdx];
+    const isStudy=p.name.includes('ESTUDIO');
+    const m=Math.floor(pomoSecsLeft/60),s=pomoSecsLeft%60;
+    showPomoNotif(
+      isStudy?`📚 Estudiando · ${pad(m)}:${pad(s)}`:`☕ Descansando · ${pad(m)}:${pad(s)}`,
+      `${p.name} en curso. Te avisamos cuando termine.`,
+      'pomo-active'
+    );
   }
+  pomoSaveState();
 }
+
 function pomoReset(){
   if(pomoWorker){pomoWorker.postMessage('stop');}
-  pomoRunning=false;pomoStartTime=null;
+  if(activeNotif){try{activeNotif.close();}catch(e){}}
+  pomoRunning=false;pomoStartTime=null;activeNotif=null;
   pomoSecsLeft=POMO_PHASES[pomoPhaseIdx].dur;
   document.getElementById('pomoBtnStart').textContent='▶';
   document.getElementById('pomoBtnStart').classList.remove('active');
+  S('pomoState',null);
   updatePomoUI();
 }
+
 function updatePomoUI(){
   const phase=POMO_PHASES[pomoPhaseIdx];
   const total=phase.dur,elapsed=total-pomoSecsLeft;
@@ -1889,8 +1975,8 @@ function updatePomoUI(){
   if(fill){fill.style.strokeDashoffset=offset;fill.style.stroke=phase.color;}
   const m=Math.floor(pomoSecsLeft/60),s=pomoSecsLeft%60;
   const el=document.getElementById('pomoTime');if(el)el.textContent=`${pad(m)}:${pad(s)}`;
-  const pl=document.getElementById('pomoPhase');if(pl)pl.textContent=`POMODORO · ${phase.name}`;
-  const rl=document.getElementById('pomoRingLbl');if(rl)rl.textContent=phase.name==='ESTUDIO'?'📚':'☕';
+  const pl=document.getElementById('pomoPhase');if(pl)pl.textContent=`${phase.emoji} ${phase.name}`;
+  const rl=document.getElementById('pomoRingLbl');if(rl)rl.textContent=phase.emoji;
 }
 
 // ══════════════════════════════════════════
@@ -2321,7 +2407,7 @@ function buildBlocksEditor(cfg){
 // ══════════════════════════════════════════
 // INIT
 applySettings();rebuildSubjectList();sortEvs();buildTimeline();initNotes();buildChecklist();buildWeekTabs();buildStudyDay();buildAgenda();buildNxView();
-updatePomoUI();updateBw();buildMoodRow();buildGoalCard();updateTod();buildMiniStats();updateExamAlert();buildSubjProgress();buildSettingsView();
+pomoRestoreState();updatePomoUI();updateBw();buildMoodRow();buildGoalCard();updateTod();buildMiniStats();updateExamAlert();buildSubjProgress();buildSettingsView();
 requestNotifPermission();
 tick();
 setInterval(tick,1000);
