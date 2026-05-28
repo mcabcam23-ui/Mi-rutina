@@ -731,14 +731,17 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
     <div class="tcard card"><div class="tcard-h"><span class="tcard-ic">🚂</span><span class="tcard-t">Aprovecha el viaje</span></div><div class="tcard-b">50 min × 2 = <strong>1h40 diaria de repaso</strong>. Son 250 min semanales gratis.</div></div>
     <div class="tcard card"><div class="tcard-h"><span class="tcard-ic">🔥</span><span class="tcard-t">Racha</span></div><div class="tcard-b">Toca el widget de racha en HOY para marcar el día. <strong>La constancia supera al talento.</strong></div></div>
   </div>
+  <div style="padding:0 18px 18px">
+    <button class="btn-primary" style="width:100%;border-radius:var(--r2)" onclick="markDayDone()">✓ MARCAR HOY COMO COMPLETADO</button>
+  </div>
   <div class="backup-section">
     <div class="slbl">COPIA DE SEGURIDAD</div>
     <div class="backup-info">Exporta antes de actualizar la app. Al importar se restauran todos tus datos.</div>
     <div class="backup-btns">
       <button class="backup-btn exp" onclick="exportData()">⬇ EXPORTAR</button>
-      <button class="backup-btn imp" onclick="document.getElementById('importFile').click()">⬆ IMPORTAR</button>
+      <button class="backup-btn imp" onclick="document.getElementById('importFileTips').click()">⬆ IMPORTAR</button>
     </div>
-    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+    <input type="file" id="importFileTips" accept=".json" style="display:none" onchange="importData(event)">
   </div>
 </div>
 
@@ -826,6 +829,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;disp
   <button class="ni" onclick="sw('agenda',this)"><div class="ni-ic">🗓️</div><div class="ni-lb">AGENDA</div></button>
   <button class="ni" onclick="sw('notas',this)"><div class="ni-ic">📝</div><div class="ni-lb">NOTAS</div></button>
   <button class="ni" onclick="sw('estudio',this)"><div class="ni-ic">📚</div><div class="ni-lb">ESTUDIO</div></button>
+  <button class="ni" onclick="sw('tips',this)"><div class="ni-ic">💡</div><div class="ni-lb">CONSEJOS</div></button>
   <button class="ni" onclick="sw('ajustes',this)"><div class="ni-ic">⚙️</div><div class="ni-lb">AJUSTES</div></button>
 </nav>
 
@@ -1822,40 +1826,56 @@ function sw(name,btn){
 // POMODORO
 // ══════════════════════════════════════════
 const POMO_PHASES=[
-  {name:'ESTUDIO',dur:50*60,color:'var(--y)'},
-  {name:'DESCANSO CORTO',dur:10*60,color:'var(--g)'},
-  {name:'ESTUDIO',dur:50*60,color:'var(--y)'},
+  {name:'ESTUDIO',      dur:50*60, color:'var(--y)'},
+  {name:'DESCANSO',     dur:10*60, color:'var(--g)'},
+  {name:'ESTUDIO',      dur:50*60, color:'var(--y)'},
   {name:'DESCANSO LARGO',dur:20*60,color:'var(--b)'},
 ];
-let pomoPhaseIdx=0,pomoSecsLeft=POMO_PHASES[0].dur,pomoRunning=false,pomoInterval=null;
+let pomoPhaseIdx=0,pomoSecsLeft=POMO_PHASES[0].dur,pomoRunning=false;
+let pomoWorker=null,pomoStartTime=null,pomoStartSecs=null;
+
+function createPomoWorker(){
+  const code=`let iv=null;self.onmessage=function(e){if(e.data==='start'){iv=setInterval(()=>self.postMessage('tick'),1000);}else if(e.data==='stop'){clearInterval(iv);iv=null;}};`;
+  return new Worker(URL.createObjectURL(new Blob([code],{type:'application/javascript'})));
+}
 
 function pomoToggle(){
   if(pomoRunning){
-    clearInterval(pomoInterval);pomoRunning=false;
-    document.getElementById('pomoBtnStart').textContent='▶ CONTINUAR';
+    if(pomoStartTime){const elapsed=Math.round((Date.now()-pomoStartTime)/1000);pomoSecsLeft=Math.max(0,pomoStartSecs-elapsed);}
+    if(pomoWorker)pomoWorker.postMessage('stop');
+    pomoRunning=false;
+    document.getElementById('pomoBtnStart').textContent='▶';
     document.getElementById('pomoBtnStart').classList.remove('active');
   }else{
-    pomoRunning=true;
-    document.getElementById('pomoBtnStart').textContent='⏸ PAUSAR';
-    document.getElementById('pomoBtnStart').classList.add('active');
-    pomoInterval=setInterval(()=>{
-      pomoSecsLeft--;
-      if(pomoSecsLeft<=0){
-        pomoPhaseIdx=(pomoPhaseIdx+1)%POMO_PHASES.length;
-        pomoSecsLeft=POMO_PHASES[pomoPhaseIdx].dur;
-        if(Notification.permission==='granted'){
-          const p=POMO_PHASES[pomoPhaseIdx];
-          new Notification(p.name==='ESTUDIO'?'📚 ¡A estudiar!':'☕ Descanso',{body:`Siguiente: ${p.name} (${p.dur/60} min)`});
+    pomoStartTime=Date.now();pomoStartSecs=pomoSecsLeft;
+    if(!pomoWorker){
+      pomoWorker=createPomoWorker();
+      pomoWorker.onmessage=()=>{
+        const elapsed=Math.round((Date.now()-pomoStartTime)/1000);
+        pomoSecsLeft=Math.max(0,pomoStartSecs-elapsed);
+        if(pomoSecsLeft<=0){
+          pomoPhaseIdx=(pomoPhaseIdx+1)%POMO_PHASES.length;
+          pomoSecsLeft=POMO_PHASES[pomoPhaseIdx].dur;
+          pomoStartTime=Date.now();pomoStartSecs=pomoSecsLeft;
+          if(Notification.permission==='granted'){
+            const p=POMO_PHASES[pomoPhaseIdx];
+            new Notification(p.name.includes('ESTUDIO')?'📚 ¡A estudiar!':'☕ Descansa',{body:`${p.dur/60} minutos`});
+          }
         }
-      }
-      updatePomoUI();
-    },1000);
+        updatePomoUI();
+      };
+    }
+    pomoWorker.postMessage('start');
+    pomoRunning=true;
+    document.getElementById('pomoBtnStart').textContent='⏸';
+    document.getElementById('pomoBtnStart').classList.add('active');
   }
 }
 function pomoReset(){
-  clearInterval(pomoInterval);pomoRunning=false;
+  if(pomoWorker){pomoWorker.postMessage('stop');}
+  pomoRunning=false;pomoStartTime=null;
   pomoSecsLeft=POMO_PHASES[pomoPhaseIdx].dur;
-  document.getElementById('pomoBtnStart').textContent='▶ INICIAR';
+  document.getElementById('pomoBtnStart').textContent='▶';
   document.getElementById('pomoBtnStart').classList.remove('active');
   updatePomoUI();
 }
@@ -2063,6 +2083,240 @@ function buildSubjProgress(){
     wrap.appendChild(row);
   });
 }
+
+
+// ══════════════════════════════════════════
+// SETTINGS SYSTEM
+// ══════════════════════════════════════════
+
+const THEMES={
+  dark:   {name:'Oscuro',    bg:'#05060a',panel:'#0b0d13',card:'#10121a',card2:'#161820',border:'#1a1d27',border2:'#252836',text:'#edeae3',muted:'#4e5264',muted2:'#252836'},
+  deeper: {name:'Profundo',  bg:'#020304',panel:'#070810',card:'#0c0e16',card2:'#12141e',border:'#161824',border2:'#1e2132',text:'#edeae3',muted:'#464a5e',muted2:'#1e2132'},
+  slate:  {name:'Pizarra',   bg:'#0a0c10',panel:'#111520',card:'#161b28',card2:'#1c2233',border:'#1e2538',border2:'#2a3448',text:'#e8e6f0',muted:'#555d78',muted2:'#2a3448'},
+  night:  {name:'Noche',     bg:'#060608',panel:'#0e0e12',card:'#141418',card2:'#1a1a20',border:'#1e1e26',border2:'#282832',text:'#e8e6e0',muted:'#505060',muted2:'#252530'},
+  warm:   {name:'Cálido',    bg:'#090806',panel:'#100f0c',card:'#161410',card2:'#1c1a16',border:'#221f1a',border2:'#2e2a24',text:'#f0ede6',muted:'#5c5650',muted2:'#2e2a24'},
+  forest: {name:'Bosque',    bg:'#050a06',panel:'#0a1009',card:'#0f160e',card2:'#141c13',border:'#1a2419',border2:'#243224',text:'#e6ede6',muted:'#4e5e4e',muted2:'#1e2a1e'},
+};
+
+const ACCENTS={
+  yellow: {y:'#f5c400',ya:'rgba(245,196,0,.12)', grady:'linear-gradient(135deg,#f5c400,#f07028)'},
+  orange: {y:'#f07028',ya:'rgba(240,112,40,.12)', grady:'linear-gradient(135deg,#f07028,#e03535)'},
+  cyan:   {y:'#00d4ff',ya:'rgba(0,212,255,.12)',  grady:'linear-gradient(135deg,#00d4ff,#3498db)'},
+  green:  {y:'#2dcc70',ya:'rgba(45,204,112,.12)', grady:'linear-gradient(135deg,#2dcc70,#1abc9c)'},
+  purple: {y:'#9b59b6',ya:'rgba(155,89,182,.12)', grady:'linear-gradient(135deg,#9b59b6,#3498db)'},
+  red:    {y:'#e03535',ya:'rgba(224,53,53,.12)',  grady:'linear-gradient(135deg,#e03535,#f07028)'},
+  white:  {y:'#e8e6e0',ya:'rgba(255,255,255,.08)', grady:'linear-gradient(135deg,#e8e6e0,#aaaaaa)'},
+};
+
+function loadSettings(){
+  return L('appSettings',{
+    theme:'dark', accent:'yellow',
+    nombre:'', cityFrom:'GIJÓN', cityTo:'OVIEDO',
+    badge:'\u2b1b MAQUINISTA \u00b7 2026', heroTitle:'MI HORARIO',
+    pomStudy:50, pomShort:10, pomLong:20,
+    waterGoal:8, sleepGoal:8,
+    goalTemplates:['Repasar apuntes a diario','Ir al gym 5 días','Dormir 7h mínimo','Sin faltar al bus','Completar tema libre cada día'],
+    customSubjects:[],
+    studyBlocks:[
+      {id:'repaso',label:'REPASO DEL DÍA',time:'16:00-18:00',colorVar:'y'},
+      {id:'libre', label:'TEMA LIBRE',    time:'18:00-19:00',colorVar:'o'},
+      {id:'gym',   label:'GYM',           time:'20:00-21:00',colorVar:'b',gymBlock:true},
+    ]
+  });
+}
+
+function saveSettings(){
+  const cfg=loadSettings();
+  const g=id=>document.getElementById(id);
+  if(g('setNombre'))cfg.nombre=g('setNombre').value;
+  if(g('setCityFrom'))cfg.cityFrom=g('setCityFrom').value||'GIJÓN';
+  if(g('setCityTo'))cfg.cityTo=g('setCityTo').value||'OVIEDO';
+  if(g('setBadge'))cfg.badge=g('setBadge').value;
+  if(g('setHeroTitle'))cfg.heroTitle=g('setHeroTitle').value||'MI HORARIO';
+  if(g('setPomStudy'))cfg.pomStudy=parseInt(g('setPomStudy').value)||50;
+  if(g('setPomShort'))cfg.pomShort=parseInt(g('setPomShort').value)||10;
+  if(g('setPomLong'))cfg.pomLong=parseInt(g('setPomLong').value)||20;
+  if(g('setWaterGoal'))cfg.waterGoal=parseInt(g('setWaterGoal').value)||8;
+  if(g('setSleepGoal'))cfg.sleepGoal=parseInt(g('setSleepGoal').value)||8;
+  S('appSettings',cfg);
+  applySettings();
+}
+
+function applySettings(){
+  const cfg=loadSettings();
+  const t=THEMES[cfg.theme]||THEMES.dark;
+  const a=ACCENTS[cfg.accent]||ACCENTS.yellow;
+  const root=document.documentElement;
+  Object.entries(t).forEach(([k,v])=>root.style.setProperty('--'+k,v));
+  root.style.setProperty('--y',a.y);
+  root.style.setProperty('--ya',a.ya);
+  root.style.setProperty('--grad-y',a.grady);
+  const cityFrom=document.getElementById('routeCityFrom');
+  const cityTo=document.getElementById('routeCityTo');
+  const badge=document.getElementById('heroBadge');
+  const heroT=document.getElementById('heroTitleText');
+  if(cityFrom)cityFrom.textContent=cfg.cityFrom||'GIJÓN';
+  if(cityTo)cityTo.textContent=cfg.cityTo||'OVIEDO';
+  if(badge)badge.textContent=cfg.badge||'⬛ MAQUINISTA · 2026';
+  if(heroT){
+    const parts=(cfg.heroTitle||'MI HORARIO').split(' ');
+    heroT.innerHTML=parts.length>1?`${parts.slice(0,-1).join(' ')}<br><em>${parts[parts.length-1]}</em>`:`<em>${cfg.heroTitle}</em>`;
+  }
+  POMO_PHASES[0].dur=(cfg.pomStudy||50)*60;
+  POMO_PHASES[1].dur=(cfg.pomShort||10)*60;
+  POMO_PHASES[2].dur=(cfg.pomStudy||50)*60;
+  POMO_PHASES[3].dur=(cfg.pomLong||20)*60;
+  if(!pomoRunning)pomoSecsLeft=POMO_PHASES[pomoPhaseIdx].dur;
+  updatePomoUI();
+}
+
+function rebuildSubjectList(){
+  const cfg=loadSettings();
+  const custom=(cfg.customSubjects||[]).map(s=>({...s,id:s.id||'c_'+s.label}));
+  const base=[{id:'_repaso',label:'Repaso del día',icon:'📖'},...SUBJECTS];
+  ALL_STUDY_OPTIONS.length=0;
+  base.forEach(s=>ALL_STUDY_OPTIONS.push(s));
+  custom.forEach(s=>ALL_STUDY_OPTIONS.push(s));
+}
+
+function buildSettingsView(){
+  const cfg=loadSettings();
+  const g=id=>document.getElementById(id);
+  const setVal=(id,val)=>{const el=g(id);if(el&&val!==undefined&&val!=='')el.value=val;};
+  setVal('setNombre',cfg.nombre);
+  setVal('setCityFrom',cfg.cityFrom);
+  setVal('setCityTo',cfg.cityTo);
+  setVal('setBadge',cfg.badge);
+  setVal('setHeroTitle',cfg.heroTitle);
+  setVal('setPomStudy',cfg.pomStudy);
+  setVal('setPomShort',cfg.pomShort);
+  setVal('setPomLong',cfg.pomLong);
+  setVal('setWaterGoal',cfg.waterGoal);
+  setVal('setSleepGoal',cfg.sleepGoal);
+
+  // Theme grid
+  const tg=g('themeGrid');
+  if(tg){
+    tg.innerHTML='';
+    Object.entries(THEMES).forEach(([key,t])=>{
+      const card=document.createElement('div');
+      card.className='theme-card card'+(key===cfg.theme?' active':'');
+      const dots=['bg','panel','card','muted'].map(k=>`<div class="tp-dot" style="background:${t[k]}"></div>`).join('');
+      card.innerHTML=`<div class="theme-preview">${dots}</div><div class="theme-name">${t.name}</div>`;
+      card.onclick=()=>{const c=loadSettings();c.theme=key;S('appSettings',c);applySettings();buildSettingsView();};
+      tg.appendChild(card);
+    });
+  }
+
+  // Accent swatches
+  const as=g('accentSwatches');
+  if(as){
+    as.innerHTML='';
+    Object.entries(ACCENTS).forEach(([key,a])=>{
+      const sw=document.createElement('div');
+      sw.className='accent-sw'+(key===cfg.accent?' active':'');
+      sw.style.background=a.grady;
+      sw.title=key;
+      sw.onclick=()=>{const c=loadSettings();c.accent=key;S('appSettings',c);applySettings();buildSettingsView();};
+      as.appendChild(sw);
+    });
+  }
+
+  buildGoalsEditor(cfg);
+  buildSubjectsEditor(cfg);
+  buildBlocksEditor(cfg);
+}
+
+function buildGoalsEditor(cfg){
+  const el=document.getElementById('goalsEditor');if(!el)return;
+  const goals=cfg.goalTemplates||[];
+  el.innerHTML='';
+  if(goals.length===0){
+    el.innerHTML='<div style="padding:12px 14px;font-family:\'Share Tech Mono\',monospace;font-size:10px;color:var(--muted)">Sin metas · pulsa + para añadir</div>';
+    return;
+  }
+  goals.forEach((g,i)=>{
+    const row=document.createElement('div');row.className='set-row';
+    const inp=document.createElement('input');inp.className='set-inp';
+    inp.style.cssText='max-width:none;flex:1;';
+    inp.value=g;inp.placeholder='Escribe una meta...';inp.maxLength=60;
+    inp.oninput=()=>{const c=loadSettings();c.goalTemplates[i]=inp.value;S('appSettings',c);};
+    const del=document.createElement('button');del.className='set-del';del.textContent='✕';
+    del.onclick=()=>{const c=loadSettings();c.goalTemplates.splice(i,1);S('appSettings',c);buildSettingsView();buildGoalCard();};
+    row.appendChild(inp);row.appendChild(del);el.appendChild(row);
+  });
+}
+
+function addGoalTemplate(){
+  const c=loadSettings();
+  if(!c.goalTemplates)c.goalTemplates=[];
+  c.goalTemplates.push('Nueva meta');
+  S('appSettings',c);
+  buildSettingsView();
+  buildGoalCard();
+  // Focus the new input
+  setTimeout(()=>{
+    const rows=document.querySelectorAll('#goalsEditor .set-row');
+    if(rows.length>0){const inp=rows[rows.length-1].querySelector('input');if(inp)inp.focus();}
+  },50);
+}
+
+function buildSubjectsEditor(cfg){
+  const el=document.getElementById('subjectsEditor');if(!el)return;
+  el.innerHTML='';
+  SUBJECTS.forEach(s=>{
+    const row=document.createElement('div');row.className='set-row';
+    row.innerHTML=`<span style="font-size:17px;flex-shrink:0">${s.icon}</span><span class="set-lbl" style="margin-left:8px">${s.label}</span><span style="font-family:\'Share Tech Mono\',monospace;font-size:8px;color:var(--muted);letter-spacing:1px">FIJA</span>`;
+    el.appendChild(row);
+  });
+  (cfg.customSubjects||[]).forEach((s,i)=>{
+    const row=document.createElement('div');row.className='set-row';
+    const icInp=document.createElement('input');
+    icInp.style.cssText='width:42px;background:var(--panel);border:1px solid var(--border2);color:var(--text);font-size:17px;padding:5px;text-align:center;border-radius:var(--r2);outline:none;flex-shrink:0;';
+    icInp.value=s.icon||'📌';
+    icInp.oninput=()=>{const c=loadSettings();c.customSubjects[i].icon=icInp.value;S('appSettings',c);rebuildSubjectList();};
+    const nmInp=document.createElement('input');nmInp.className='set-inp';
+    nmInp.style.cssText='flex:1;margin:0 8px;max-width:none;';
+    nmInp.value=s.label||'';nmInp.placeholder='Nombre asignatura...';nmInp.maxLength=30;
+    nmInp.oninput=()=>{const c=loadSettings();c.customSubjects[i].label=nmInp.value;S('appSettings',c);rebuildSubjectList();};
+    const del=document.createElement('button');del.className='set-del';del.textContent='✕';
+    del.onclick=()=>{const c=loadSettings();c.customSubjects.splice(i,1);S('appSettings',c);buildSettingsView();rebuildSubjectList();};
+    row.appendChild(icInp);row.appendChild(nmInp);row.appendChild(del);el.appendChild(row);
+  });
+}
+
+function addSubjectTemplate(){
+  const c=loadSettings();
+  if(!c.customSubjects)c.customSubjects=[];
+  c.customSubjects.push({id:'cs_'+Date.now(),icon:'📌',label:'Nueva asignatura'});
+  S('appSettings',c);
+  rebuildSubjectList();
+  buildSettingsView();
+  setTimeout(()=>{
+    const rows=document.querySelectorAll('#subjectsEditor .set-row');
+    const customRows=Array.from(rows).slice(SUBJECTS.length);
+    if(customRows.length>0){const inp=customRows[customRows.length-1].querySelectorAll('input')[1];if(inp)inp.focus();}
+  },50);
+}
+
+function buildBlocksEditor(cfg){
+  const el=document.getElementById('blocksEditor');if(!el)return;
+  const blocks=cfg.studyBlocks||DEFAULT_DAY_BLOCKS;
+  el.innerHTML='';
+  blocks.forEach((b,i)=>{
+    const row=document.createElement('div');row.className='set-row';
+    row.style.cssText='flex-direction:column;align-items:stretch;gap:6px;';
+    const top=document.createElement('div');top.style.cssText='display:flex;gap:8px;align-items:center;';
+    const lbl=document.createElement('input');lbl.className='set-inp';lbl.style.cssText='flex:1;max-width:none;';
+    lbl.value=b.label;lbl.placeholder='Nombre del bloque';lbl.maxLength=30;
+    lbl.oninput=()=>{const c=loadSettings();if(c.studyBlocks[i])c.studyBlocks[i].label=lbl.value;S('appSettings',c);};
+    const time=document.createElement('input');time.className='set-inp';time.style.maxWidth='110px';
+    time.value=b.time;time.placeholder='16:00-18:00';time.maxLength=14;
+    time.oninput=()=>{const c=loadSettings();if(c.studyBlocks[i])c.studyBlocks[i].time=time.value;S('appSettings',c);};
+    top.appendChild(lbl);top.appendChild(time);row.appendChild(top);el.appendChild(row);
+  });
+}
+
 
 // ══════════════════════════════════════════
 // INIT
